@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"strings"
@@ -91,6 +92,29 @@ func newGroupsParticipantsActionCmd(flags *rootFlags, action string) *cobra.Comm
 
 			a, lk, err := newApp(ctx, flags, true, false)
 			if err != nil {
+				// Store locked by a running `sync --follow`: reuse its connection.
+				resp, delegated, delegateErr := tryDelegateSend(ctx, flags, err, sendDelegateRequest{
+					Kind:              participantsDelegateKind,
+					To:                group,
+					Users:             users,
+					ParticipantAction: action,
+				})
+				if delegated {
+					if delegateErr != nil {
+						return delegateErr
+					}
+					if flags.asJSON {
+						var updated any = []any{}
+						if len(resp.Participants) > 0 {
+							if err := json.Unmarshal(resp.Participants, &updated); err != nil {
+								return err
+							}
+						}
+						return out.WriteJSON(os.Stdout, updated)
+					}
+					fmt.Fprintln(os.Stdout, "OK (via running sync)")
+					return nil
+				}
 				return err
 			}
 			defer closeApp(a, lk)
